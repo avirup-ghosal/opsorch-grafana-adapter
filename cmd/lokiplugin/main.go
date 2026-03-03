@@ -8,31 +8,37 @@ import (
 	"io"
 	"os"
 
-	adapter "github.com/opsorch/opsorch-grafana-adapter/log"
 	corelog "github.com/opsorch/opsorch-core/log"
 	"github.com/opsorch/opsorch-core/schema"
+
+	adapter "github.com/opsorch/opsorch-grafana-adapter/log"
 )
 
+// rpcRequest represents an incoming command from the OpsOrch core.
 type rpcRequest struct {
 	Method  string          `json:"method"`
 	Config  map[string]any  `json:"config"`
 	Payload json.RawMessage `json:"payload"`
 }
 
+// rpcResponse represents the outgoing result sent back to OpsOrch core.
 type rpcResponse struct {
 	Result any    `json:"result,omitempty"`
 	Error  string `json:"error,omitempty"`
 }
 
+// Global provider instance to maintain the HTTP client and connection pool.
 var provider corelog.Provider
 
 func main() {
+	// The core system communicates with this plugin entirely via standard I/O
 	dec := json.NewDecoder(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)
 
 	for {
 		var req rpcRequest
 		if err := dec.Decode(&req); err != nil {
+			// If the core system closes the connection, shut down
 			if errors.Is(err, io.EOF) {
 				return
 			}
@@ -40,6 +46,7 @@ func main() {
 			return
 		}
 
+		// Ensure Loki provider is initialized with the correct config
 		prov, err := ensureProvider(req.Config)
 		if err != nil {
 			writeErr(enc, err)
@@ -47,17 +54,19 @@ func main() {
 		}
 
 		ctx := context.Background()
+
+		// Route the incoming JSON-RPC method to the correct Go function
 		switch req.Method {
-		case "log.query": // CHANGED: Now looking for log queries
-			var query schema.LogQuery // CHANGED: Using LogQuery schema
+		case "log.query":
+			var query schema.LogQuery
 			if err := json.Unmarshal(req.Payload, &query); err != nil {
 				writeErr(enc, err)
 				continue
 			}
+
+			// Execute the actual Loki search
 			res, err := prov.Query(ctx, query)
 			write(enc, res, err)
-
-		// DELETED: All incident.create, incident.update, etc.
 
 		default:
 			writeErr(enc, fmt.Errorf("unknown method: %s", req.Method))
@@ -65,18 +74,23 @@ func main() {
 	}
 }
 
+// ensureProvider acts as a singleton loader so we only instantiate the HTTP client once.
 func ensureProvider(cfg map[string]any) (corelog.Provider, error) {
 	if provider != nil {
 		return provider, nil
 	}
+
+	// Call the constructor we wrote in log/loki_provider.go
 	prov, err := adapter.New(cfg)
 	if err != nil {
 		return nil, err
 	}
+
 	provider = prov
 	return provider, nil
 }
 
+// write handles sending successful payloads back to the core system.
 func write(enc *json.Encoder, result any, err error) {
 	if err != nil {
 		writeErr(enc, err)
@@ -85,6 +99,7 @@ func write(enc *json.Encoder, result any, err error) {
 	_ = enc.Encode(rpcResponse{Result: result})
 }
 
+// writeErr safely packages errors so the core system doesn't crash if the plugin fails.
 func writeErr(enc *json.Encoder, err error) {
 	_ = enc.Encode(rpcResponse{Error: err.Error()})
 }
