@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 )
 
 // ProviderName is the registry key for this adapter.
-const ProviderName = "loki"
+const ProviderName = "grafana"
 
 // Provider is the Loki implementation of the core log provider.
 type Provider struct {
@@ -51,9 +52,9 @@ func (p *Provider) buildQueryURL(q schema.LogQuery) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid base URL: %w", err)
 	}
-	u.Path = "/loki/api/v1/query_range"
+	u.Path = path.Join(u.Path, "/loki/api/v1/query_range")
 
-	logQL := buildLogQL(q.Expression)
+	logQL := buildLogQL(&q)
 
 	params := url.Values{}
 	params.Add("query", logQL)
@@ -73,38 +74,56 @@ func (p *Provider) buildQueryURL(q schema.LogQuery) (string, error) {
 }
 
 // buildLogQL translates the generic OpsOrch LogExpression into a Loki LogQL query.
-func buildLogQL(expr *schema.LogExpression) string {
-	// Loki requires at least one label matcher; use a safe fallback if empty
-	if expr == nil {
+func buildLogQL(q *schema.LogQuery) string {
+	// Safe fallback if the entire query object is nil
+	if q == nil {
 		return `{job=~".+"}`
 	}
 
 	var labelSelectors []string
 
-	// 1. Map the structured filters into Loki labels: {field="value"}
-	for _, filter := range expr.Filters {
-		op := filter.Operator
-		if op == "contains" || op == "regex" {
-			op = "=~"
-		}
-		// Format: field="value"
-		labelSelectors = append(labelSelectors, fmt.Sprintf(`%s%s%q`, filter.Field, op, filter.Value))
+	// Inject Scope (Service & Environment)
+	if q.Scope.Service != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`service=%q`, q.Scope.Service))
+	}
+	if q.Scope.Environment != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`env=%q`, q.Scope.Environment))
 	}
 
-	logQL := "{}"
+	// Inject Metadata (Custom key-value pairs)
+	for key, value := range q.Metadata {
+		// Convert the 'any' interface to a string safely
+		strVal := fmt.Sprintf("%v", value)
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`%s=%q`, key, strVal))
+	}
+
+	// Inject structured Expression filters
+	if q.Expression != nil {
+		for _, filter := range q.Expression.Filters {
+			op := filter.Operator
+			if op == "contains" || op == "regex" {
+				op = "=~" // Map to Loki regex operator
+			}
+			labelSelectors = append(labelSelectors, fmt.Sprintf(`%s%s%q`, filter.Field, op, filter.Value))
+		}
+	}
+
+	logQL := ""
 	if len(labelSelectors) > 0 {
 		logQL = fmt.Sprintf("{%s}", strings.Join(labelSelectors, ", "))
 	} else {
 		logQL = `{job=~".+"}` // Loki requires at least one label matcher
 	}
 
-	if expr.Search != "" {
-		logQL += fmt.Sprintf(" |= %q", expr.Search)
-	}
+	if q.Expression != nil {
+		if q.Expression.Search != "" {
+			logQL += fmt.Sprintf(" |= %q", q.Expression.Search)
+		}
 
-	if len(expr.SeverityIn) > 0 {
-		severities := strings.Join(expr.SeverityIn, "|")
-		logQL += fmt.Sprintf(" |~ `(?i)(%s)`", severities)
+		if len(q.Expression.SeverityIn) > 0 {
+			severities := strings.Join(q.Expression.SeverityIn, "|")
+			logQL += fmt.Sprintf(" |~ `(?i)(%s)`", severities)
+		}
 	}
 
 	return logQL

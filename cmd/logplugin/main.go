@@ -31,14 +31,13 @@ type rpcResponse struct {
 var provider corelog.Provider
 
 func main() {
-	// The core system communicates with this plugin entirely via standard I/O
+	// The core system communicates with this plugin via standard I/O
 	dec := json.NewDecoder(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)
 
 	for {
 		var req rpcRequest
 		if err := dec.Decode(&req); err != nil {
-			// If the core system closes the connection, shut down
 			if errors.Is(err, io.EOF) {
 				return
 			}
@@ -64,7 +63,6 @@ func main() {
 				continue
 			}
 
-			// Execute the actual Loki search
 			res, err := prov.Query(ctx, query)
 			write(enc, res, err)
 
@@ -74,13 +72,11 @@ func main() {
 	}
 }
 
-// ensureProvider acts as a singleton loader so we only instantiate the HTTP client once.
 func ensureProvider(cfg map[string]any) (corelog.Provider, error) {
 	if provider != nil {
 		return provider, nil
 	}
 
-	// Call the constructor we wrote in log/loki_provider.go
 	prov, err := adapter.New(cfg)
 	if err != nil {
 		return nil, err

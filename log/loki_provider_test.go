@@ -19,7 +19,7 @@ func TestNewLokiProvider(t *testing.T) {
 		{
 			name:    "valid config",
 			config:  map[string]any{"url": "http://localhost:3100"},
-			wantErr: false, // New() function doesn't return error, but this structure matches Prometheus
+			wantErr: false,
 		},
 		{
 			name:    "empty config uses default",
@@ -66,17 +66,17 @@ func TestLokiProvider_Query(t *testing.T) {
 				Limit: 100,
 			},
 			mockResponse: `{
-				"status": "success",
-				"data": {
-					"resultType": "streams",
-					"result": [
-						{
-							"stream": { "app": "frontend" },
-							"values": [ [ "1708990000000000000", "error connecting to db" ] ]
-						}
-					]
-				}
-			}`,
+                "status": "success",
+                "data": {
+                    "resultType": "streams",
+                    "result": [
+                        {
+                            "stream": { "app": "frontend" },
+                            "values": [ [ "1708990000000000000", "error connecting to db" ] ]
+                        }
+                    ]
+                }
+            }`,
 			expectedQuery: `{app="frontend"} |= "error connecting"`,
 			wantEntries:   1,
 			validate: func(t *testing.T, res schema.LogEntries) {
@@ -95,10 +95,30 @@ func TestLokiProvider_Query(t *testing.T) {
 				End:   defaultEnd,
 			},
 			mockResponse: `{
-				"status": "success",
-				"data": { "resultType": "streams", "result": [] }
-			}`,
+                "status": "success",
+                "data": { "resultType": "streams", "result": [] }
+            }`,
 			expectedQuery: `{job=~".+"}`,
+			wantEntries:   0,
+		},
+		{
+			name: "query with scope and metadata",
+			query: schema.LogQuery{
+				Scope: schema.QueryScope{
+					Service:     "api-gateway",
+					Environment: "prod",
+				},
+				Metadata: map[string]any{
+					"cluster": "us-east-1",
+				},
+				Start: defaultStart,
+				End:   defaultEnd,
+			},
+			mockResponse: `{
+                "status": "success",
+                "data": { "resultType": "streams", "result": [] }
+            }`,
+			expectedQuery: `{service="api-gateway", env="prod", cluster="us-east-1"}`,
 			wantEntries:   0,
 		},
 		{

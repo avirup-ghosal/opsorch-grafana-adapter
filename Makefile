@@ -20,7 +20,7 @@ build:
 
 
 plugin:
-	$(CACHE_ENV) $(GO) build -o bin/lokiplugin ./cmd/lokiplugin
+	$(CACHE_ENV) $(GO) build -o bin/logplugin ./cmd/logplugin
 
 
 integ-log:
