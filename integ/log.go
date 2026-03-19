@@ -20,8 +20,7 @@ func seedTestLog(lokiURL string) {
 	log.Println(" Seeding test data into Loki...")
 
 	now := time.Now().UnixNano()
-	payload := fmt.Sprintf(`{"streams": [{"stream": {"job": "integ-test", "app": "opsorch", "service": "payment-api", "env": "prod", "cluster": "us-east-1"}, "values": [[ "%d", "fatal error: database connection lost" ]]}]}`, now)
-
+	payload := fmt.Sprintf(`{"streams": [{"stream": {"job": "integ-test", "app": "opsorch", "service": "payment-api", "env": "prod", "cluster": "us-east-1"}, "values": [[ "%d", "{\"app\": \"opsorch\", \"level\": \"error\", \"message\": \"fatal error: database connection lost\"}" ]]}]}`, now)
 	req, err := http.NewRequest("POST", lokiURL+"/loki/api/v1/push", strings.NewReader(payload))
 	if err != nil {
 		log.Fatalf(" Failed to create seed request: %v", err)

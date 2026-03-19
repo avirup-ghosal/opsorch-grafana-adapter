@@ -10,7 +10,7 @@ import (
 	"github.com/opsorch/opsorch-core/schema"
 )
 
-func TestNewLokiProvider(t *testing.T) {
+func TestNewGrafanaProvider(t *testing.T) {
 	tests := []struct {
 		name    string
 		config  map[string]any
@@ -38,7 +38,7 @@ func TestNewLokiProvider(t *testing.T) {
 	}
 }
 
-func TestLokiProvider_Query(t *testing.T) {
+func TestGrafanaProvider_Query(t *testing.T) {
 	defaultStart := time.Unix(1708990000, 0)
 	defaultEnd := time.Unix(1708993600, 0)
 
@@ -77,7 +77,7 @@ func TestLokiProvider_Query(t *testing.T) {
                     ]
                 }
             }`,
-			expectedQuery: `{app="frontend"} |= "error connecting"`,
+			expectedQuery: `{job=~".+"} | json | app="frontend" |= "error connecting"`,
 			wantEntries:   1,
 			validate: func(t *testing.T, res schema.LogEntries) {
 				if res.Entries[0].Labels["app"] != "frontend" {

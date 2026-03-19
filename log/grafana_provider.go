@@ -81,6 +81,7 @@ func buildLogQL(q *schema.LogQuery) string {
 	}
 
 	var labelSelectors []string
+	var lineFilters []string
 
 	// Inject Scope (Service & Environment)
 	if q.Scope.Service != "" {
@@ -104,7 +105,8 @@ func buildLogQL(q *schema.LogQuery) string {
 			if op == "contains" || op == "regex" {
 				op = "=~" // Map to Loki regex operator
 			}
-			labelSelectors = append(labelSelectors, fmt.Sprintf(`%s%s%q`, filter.Field, op, filter.Value))
+			// Append to lineFilters
+			lineFilters = append(lineFilters, fmt.Sprintf(`%s%s%q`, filter.Field, op, filter.Value))
 		}
 	}
 
@@ -112,7 +114,14 @@ func buildLogQL(q *schema.LogQuery) string {
 	if len(labelSelectors) > 0 {
 		logQL = fmt.Sprintf("{%s}", strings.Join(labelSelectors, ", "))
 	} else {
-		logQL = `{job=~".+"}` // Loki requires at least one label matcher
+		logQL = `{job=~".+"}` // Loki requires at least one Stream matcher
+	}
+
+	if len(lineFilters) > 0 {
+		logQL += " | json"
+		for _, filter := range lineFilters {
+			logQL += fmt.Sprintf(" | %s", filter)
+		}
 	}
 
 	if q.Expression != nil {
