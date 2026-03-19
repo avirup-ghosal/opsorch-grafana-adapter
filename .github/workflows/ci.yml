@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.21", "1.22"]
+    services:
+      loki:
+        image: grafana/loki:2.9.4
+        ports:
+          - 3100:3100
+        options: >-
+          --health-cmd "wget --quiet --tries=1 --spider http://localhost:3100/ready || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Remove local replace directive
+        run: |
+          go mod edit -dropreplace github.com/opsorch/opsorch-core 
+          go mod tidy
+
+      - name: Run unit tests
+        run: make test
+
+      - name: Build plugins
+        run: make plugin
+
+      - name: Run integration tests
+        run: make integ
+        env:
+          LOKI_URL: http://localhost:3100
+
+  lint:
+    name: Lint and Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Remove local replace directive
+        run: |
+          go mod edit -dropreplace github.com/opsorch/opsorch-core 
+          go mod tidy
+
+      - name: Check formatting
+        run: |
+          files=$(gofmt -l .)
+          if [ -n "$files" ]; then
+            echo "The following files need gofmt:" && echo "$files"
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Run staticcheck
+        run: staticcheck ./...
