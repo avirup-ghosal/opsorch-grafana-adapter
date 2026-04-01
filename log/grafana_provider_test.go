@@ -77,7 +77,7 @@ func TestGrafanaProvider_Query(t *testing.T) {
                     ]
                 }
             }`,
-			expectedQuery: `{job=~".+"} | json | app="frontend" |= "error connecting"`,
+			expectedQuery: `{service_name=~".+"} | json | app="frontend" |= "error connecting"`,
 			wantEntries:   1,
 			validate: func(t *testing.T, res schema.LogEntries) {
 				if res.Entries[0].Labels["app"] != "frontend" {
@@ -98,7 +98,7 @@ func TestGrafanaProvider_Query(t *testing.T) {
                 "status": "success",
                 "data": { "resultType": "streams", "result": [] }
             }`,
-			expectedQuery: `{job=~".+"}`,
+			expectedQuery: `{service_name=~".+"}`,
 			wantEntries:   0,
 		},
 		{
@@ -142,6 +142,43 @@ func TestGrafanaProvider_Query(t *testing.T) {
 			mockStatusCode: 200,
 			mockResponse:   `this is not json`,
 			wantErr:        true,
+		},
+		{
+			name: "pipeline filter with regex operator",
+			query: schema.LogQuery{
+				Expression: &schema.LogExpression{
+					Filters: []schema.LogFilter{
+						{Field: "app", Operator: "regex", Value: "^frontend-.*"},
+					},
+				},
+			},
+			mockResponse:  `{"status": "success", "data": { "resultType": "streams", "result": [] }}`,
+			expectedQuery: `{service_name=~".+"} | json | app=~"^frontend-.*"`,
+			wantEntries:   0,
+		},
+		{
+			name: "pipeline filter with contains operator",
+			query: schema.LogQuery{
+				Expression: &schema.LogExpression{
+					Filters: []schema.LogFilter{
+						{Field: "message", Operator: "contains", Value: "timeout"},
+					},
+				},
+			},
+			mockResponse:  `{"status": "success", "data": { "resultType": "streams", "result": [] }}`,
+			expectedQuery: `{service_name=~".+"} | json | message=~".*timeout.*"`,
+			wantEntries:   0,
+		},
+		{
+			name: "metadata with invalid label characters is sanitized",
+			query: schema.LogQuery{
+				Metadata: map[string]any{
+					"app.kubernetes.io/name": "billing-service",
+				},
+			},
+			mockResponse:  `{"status": "success", "data": { "resultType": "streams", "result": [] }}`,
+			expectedQuery: `{app_kubernetes_io_name="billing-service"}`,
+			wantEntries:   0,
 		},
 	}
 

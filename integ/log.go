@@ -20,7 +20,7 @@ func seedTestLog(lokiURL string) {
 	log.Println(" Seeding test data into Loki...")
 
 	now := time.Now().UnixNano()
-	payload := fmt.Sprintf(`{"streams": [{"stream": {"job": "integ-test", "app": "opsorch", "service": "payment-api", "env": "prod", "cluster": "us-east-1"}, "values": [[ "%d", "{\"app\": \"opsorch\", \"level\": \"error\", \"message\": \"fatal error: database connection lost\"}" ]]}]}`, now)
+	payload := fmt.Sprintf(`{"streams": [{"stream": {"service_name": "payment-api", "job": "integ-test", "app": "opsorch", "service": "payment-api", "env": "prod", "cluster": "us-east-1"}, "values": [[ "%d", "{\"app\": \"opsorch\", \"level\": \"error\", \"message\": \"fatal error: database connection lost\"}" ]]}]}`, now)
 	req, err := http.NewRequest("POST", lokiURL+"/loki/api/v1/push", strings.NewReader(payload))
 	if err != nil {
 		log.Fatalf(" Failed to create seed request: %v", err)
@@ -104,6 +104,24 @@ func main() {
 					if entry.Labels["app"] != "opsorch" {
 						return fmt.Errorf("expected label app=opsorch, got %v", entry.Labels["app"])
 					}
+				}
+				return nil
+			},
+		}, {
+			name: "Query with Contains Operator (| json | message=~\".*database.*\")",
+			query: schema.LogQuery{
+				Expression: &schema.LogExpression{
+					Filters: []schema.LogFilter{
+						{Field: "message", Operator: "contains", Value: "database"},
+					},
+				},
+				Start: startWindow,
+				End:   endWindow,
+				Limit: 10,
+			},
+			validate: func(res schema.LogEntries) error {
+				if len(res.Entries) == 0 {
+					return fmt.Errorf("expected at least 1 log entry, got 0")
 				}
 				return nil
 			},

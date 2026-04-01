@@ -61,14 +61,13 @@ export OPSORCH_LOG_CONFIG='{"url":"http://localhost:3100"}'
 
 | OpsOrch Field | LogQL Mapping | Notes |
 |---------------|----------------|-------|
-| `LogQuery.Expression.Filters` | Stream selectors | Converted to `{label="value"}` syntax|
-| `LogQuery.Expression.Search` | Line filter | Converted to `{|= "search_term"}` syntax |
-| `LogQuery.Scope.Service` | Label filter | Adds `service="<name>"` stream selector |
-| `LogQuery.Scope.Environment` | Label filter | Adds `env="<name>"` stream selector |
-| `LogQuery.Metadata` | Additional labels | Injects arbitrary key/value pairs into stream selector |
-| `LogQuery.Limit` | `limit` API param | Maximum number of log lines to return
+| `LogQuery.Expression.Filters` | Pipeline line filter | Parsed via `| json`. Uses `=` by default. `regex` and `contains` operators map to `=~` with regex matching. |
+| `LogQuery.Expression.Search` | Pipeline line filter | Converted to `\|= "search_term"` syntax |
+| `LogQuery.Scope.Service` | Stream selector | Adds `service="<name>"` stream selector |
+| `LogQuery.Scope.Environment` | Stream selector | Adds `env="<name>"` stream selector |
+| `LogQuery.Metadata` | Stream selector | Injects arbitrary key/value pairs.|
+| `LogQuery.Limit` | `limit` API param | Maximum number of log lines to return |
 | `LogQuery.Start` /`End` | `start` /`end` API param | Time window for the query |
-
 #### Response Normalization
 
 | Loki Field | OpsOrch Field | Notes |
@@ -157,7 +156,7 @@ ENV OPSORCH_LOG_PLUGIN=/opt/opsorch/plugins/logplugin
 }
 ```
 
-Generates LogQL: `{app="frontend"}`
+Generates LogQL: `{service_name=~".+"} | json | app="frontend"`
 
 ### Query with Search
 
@@ -175,7 +174,7 @@ Generates LogQL: `{app="frontend"}`
 }
 ```
 
-Generates LogQL: `{app="backend"} |= "database timeout"`
+Generates LogQL: `{service_name=~".+"} | json | app="backend" |= "database timeout"`
 
 ### Query with Scope and Metadata
 
@@ -194,6 +193,21 @@ Generates LogQL: `{app="backend"} |= "database timeout"`
 ```
 
 Generates LogQL: `{service="payment-api", env="prod", cluster="us-east-1"}`
+
+### Query with Contains Operator
+
+```json
+{
+  "expression": {
+    "filters": [
+      {"field": "message", "operator": "contains", "value": "database"}
+    ]
+  },
+  "start": "2024-01-01T00:00:00Z",
+  "end": "2024-01-01T01:00:00Z"
+}
+```
+Generates LogQL: `{service_name=~".+"} | json | message=~".*database.*"`
 
 ## Development
 
@@ -270,8 +284,8 @@ docker stop loki
 ```
 opsorch-grafana-adapter/
 ├── log/                      # Log provider implementation
-│   ├── loki_provider.go      # Core provider logic
-│   └── loki_provider_test.go
+│   ├── grafana_provider.go      # Core provider logic
+│   └── grafana_provider_test.go
 │                     
 │   
 ├── cmd/
@@ -289,7 +303,7 @@ opsorch-grafana-adapter/
 
 **Key Components:**
 
-- **log/loki_provider.go**: Implements log.Provider interface, builds LogQL queries and executes range queries
+- **log/grafana_provider.go**: Implements log.Provider interface, builds LogQL queries and executes range queries
 - **cmd/logplugin**: JSON-RPC plugin wrapper for log provider
 
 ## CI/CD & Pre-Built Binaries

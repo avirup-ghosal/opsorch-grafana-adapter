@@ -77,7 +77,7 @@ func (p *Provider) buildQueryURL(q schema.LogQuery) (string, error) {
 func buildLogQL(q *schema.LogQuery) string {
 	// Safe fallback if the entire query object is nil
 	if q == nil {
-		return `{job=~".+"}`
+		return `{service_name=~".+"}`
 	}
 
 	var labelSelectors []string
@@ -95,18 +95,30 @@ func buildLogQL(q *schema.LogQuery) string {
 	for key, value := range q.Metadata {
 		// Convert the 'any' interface to a string safely
 		strVal := fmt.Sprintf("%v", value)
-		labelSelectors = append(labelSelectors, fmt.Sprintf(`%s=%q`, key, strVal))
+		safeKey := sanitizeLabelName(key) // Sanitize the key for Loki
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`%s=%q`, safeKey, strVal))
 	}
 
 	// Inject structured Expression filters
 	if q.Expression != nil {
 		for _, filter := range q.Expression.Filters {
-			op := filter.Operator
-			if op == "contains" || op == "regex" {
-				op = "=~" // Map to Loki regex operator
+			field := filter.Field
+			val := fmt.Sprintf("%v", filter.Value) // Ensure value is a string
+
+			switch filter.Operator {
+			case "regex":
+				// Maps directly to LogQL regex operator
+				lineFilters = append(lineFilters, fmt.Sprintf(`%s=~"%s"`, field, val))
+			case "contains":
+				// Simulates 'contains' using LogQL regex wildcard
+				lineFilters = append(lineFilters, fmt.Sprintf(`%s=~".*%s.*"`, field, val))
+			case "!=":
+				lineFilters = append(lineFilters, fmt.Sprintf(`%s!="%s"`, field, val))
+			case "=":
+				fallthrough
+			default:
+				lineFilters = append(lineFilters, fmt.Sprintf(`%s="%s"`, field, val))
 			}
-			// Append to lineFilters
-			lineFilters = append(lineFilters, fmt.Sprintf(`%s%s%q`, filter.Field, op, filter.Value))
 		}
 	}
 
@@ -114,7 +126,7 @@ func buildLogQL(q *schema.LogQuery) string {
 	if len(labelSelectors) > 0 {
 		logQL = fmt.Sprintf("{%s}", strings.Join(labelSelectors, ", "))
 	} else {
-		logQL = `{job=~".+"}` // Loki requires at least one Stream matcher
+		logQL = `{service_name=~".+"}` // Loki requires at least one Stream matcher
 	}
 
 	if len(lineFilters) > 0 {
@@ -194,6 +206,33 @@ func (p *Provider) Query(ctx context.Context, q schema.LogQuery) (schema.LogEntr
 	return schema.LogEntries{
 		Entries: parsedEntries,
 	}, nil
+}
+
+// sanitizeLabelName enforces Loki label naming rules.
+// It matches the regex [a-zA-Z_:][a-zA-Z0-9_:]* and prevents __internal__ collisions.
+func sanitizeLabelName(key string) string {
+	var sb strings.Builder
+	for _, r := range key {
+		// Allow letters, numbers, underscores, and colons
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == ':' {
+			sb.WriteRune(r)
+		} else {
+			sb.WriteRune('_')
+		}
+	}
+
+	res := sb.String()
+
+	if len(res) > 0 && res[0] >= '0' && res[0] <= '9' {
+		res = "_" + res
+	}
+
+	// Prevent Grafana internal label collision (cannot start AND end with __)
+	if strings.HasPrefix(res, "__") && strings.HasSuffix(res, "__") {
+		res = strings.TrimSuffix(res, "_")
+	}
+
+	return res
 }
 
 // lokiResponse represents the top-level JSON wrapper from the Loki API.
