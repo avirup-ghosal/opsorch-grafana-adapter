@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -93,31 +94,35 @@ func buildLogQL(q *schema.LogQuery) string {
 
 	// Inject Metadata (Custom key-value pairs)
 	for key, value := range q.Metadata {
-		// Convert the 'any' interface to a string safely
 		strVal := fmt.Sprintf("%v", value)
-		safeKey := sanitizeLabelName(key) // Sanitize the key for Loki
+		safeKey := sanitizeLabelName(key)
 		labelSelectors = append(labelSelectors, fmt.Sprintf(`%s=%q`, safeKey, strVal))
 	}
 
-	// Inject structured Expression filters
+	// Inject structured Expression filters securely
 	if q.Expression != nil {
 		for _, filter := range q.Expression.Filters {
-			field := filter.Field
-			val := fmt.Sprintf("%v", filter.Value) // Ensure value is a string
+			field := sanitizeLabelName(filter.Field)
+			val := fmt.Sprintf("%v", filter.Value)
 
 			switch filter.Operator {
 			case "regex":
-				// Maps directly to LogQL regex operator
-				lineFilters = append(lineFilters, fmt.Sprintf(`%s=~"%s"`, field, val))
+				// Allow regex, escape quotes & backslashes so it doesn't break the LogQL string literal
+				safeVal := strings.ReplaceAll(val, `\`, `\\`)
+				safeVal = strings.ReplaceAll(safeVal, `"`, `\"`)
+				lineFilters = append(lineFilters, fmt.Sprintf(`%s=~"%s"`, field, safeVal))
 			case "contains":
-				// Simulates 'contains' using LogQL regex wildcard
-				lineFilters = append(lineFilters, fmt.Sprintf(`%s=~".*%s.*"`, field, val))
+				// QuoteMeta prevents regex injection. Then we escape quotes for the LogQL string literal.
+				safeVal := regexp.QuoteMeta(val)
+				safeVal = strings.ReplaceAll(safeVal, `\`, `\\`)
+				safeVal = strings.ReplaceAll(safeVal, `"`, `\"`)
+				lineFilters = append(lineFilters, fmt.Sprintf(`%s=~".*%s.*"`, field, safeVal))
 			case "!=":
-				lineFilters = append(lineFilters, fmt.Sprintf(`%s!="%s"`, field, val))
+				lineFilters = append(lineFilters, fmt.Sprintf(`%s!=%q`, field, val))
 			case "=":
 				fallthrough
 			default:
-				lineFilters = append(lineFilters, fmt.Sprintf(`%s="%s"`, field, val))
+				lineFilters = append(lineFilters, fmt.Sprintf(`%s=%q`, field, val))
 			}
 		}
 	}
@@ -126,7 +131,7 @@ func buildLogQL(q *schema.LogQuery) string {
 	if len(labelSelectors) > 0 {
 		logQL = fmt.Sprintf("{%s}", strings.Join(labelSelectors, ", "))
 	} else {
-		logQL = `{service_name=~".+"}` // Loki requires at least one Stream matcher
+		logQL = `{service_name=~".+"}`
 	}
 
 	if len(lineFilters) > 0 {
@@ -137,13 +142,25 @@ func buildLogQL(q *schema.LogQuery) string {
 	}
 
 	if q.Expression != nil {
+		// Search is already safe because it uses %q
 		if q.Expression.Search != "" {
 			logQL += fmt.Sprintf(" |= %q", q.Expression.Search)
 		}
 
 		if len(q.Expression.SeverityIn) > 0 {
-			severities := strings.Join(q.Expression.SeverityIn, "|")
-			logQL += fmt.Sprintf(" |~ `(?i)(%s)`", severities)
+			// Prevent regex injection in severity mapping
+			var safeSeverities []string
+			for _, sev := range q.Expression.SeverityIn {
+				safeSeverities = append(safeSeverities, regexp.QuoteMeta(sev))
+			}
+			severities := strings.Join(safeSeverities, "|")
+
+			// Format safely into a LogQL double-quoted regex string
+			safeRegex := fmt.Sprintf("(?i)(%s)", severities)
+			safeRegex = strings.ReplaceAll(safeRegex, `\`, `\\`)
+			safeRegex = strings.ReplaceAll(safeRegex, `"`, `\"`)
+
+			logQL += fmt.Sprintf(` |~ "%s"`, safeRegex)
 		}
 	}
 

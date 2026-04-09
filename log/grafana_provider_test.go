@@ -180,6 +180,56 @@ func TestGrafanaProvider_Query(t *testing.T) {
 			expectedQuery: `{app_kubernetes_io_name="billing-service"}`,
 			wantEntries:   0,
 		},
+		{
+			name: "prevents logql injection by safely escaping quotes in exact match",
+			query: schema.LogQuery{
+				Expression: &schema.LogExpression{
+					Filters: []schema.LogFilter{
+						{Field: "message", Operator: "=", Value: `malicious "quote" test`},
+					},
+				},
+			},
+			mockResponse:  `{"status": "success", "data": { "resultType": "streams", "result": [] }}`,
+			expectedQuery: `{service_name=~".+"} | json | message="malicious \"quote\" test"`,
+			wantEntries:   0,
+		},
+		{
+			name: "prevents regex injection in contains operator",
+			query: schema.LogQuery{
+				Expression: &schema.LogExpression{
+					Filters: []schema.LogFilter{
+						{Field: "path", Operator: "contains", Value: `/api/v1/data?id=.*`},
+					},
+				},
+			},
+			mockResponse:  `{"status": "success", "data": { "resultType": "streams", "result": [] }}`,
+			expectedQuery: `{service_name=~".+"} | json | path=~".*/api/v1/data\\?id=\\.\\*.*"`,
+			wantEntries:   0,
+		},
+		{
+			name: "safely escapes severity list",
+			query: schema.LogQuery{
+				Expression: &schema.LogExpression{
+					SeverityIn: []string{"error", `critical"bug`},
+				},
+			},
+			mockResponse:  `{"status": "success", "data": { "resultType": "streams", "result": [] }}`,
+			expectedQuery: `{service_name=~".+"} |~ "(?i)(error|critical\"bug)"`,
+			wantEntries:   0,
+		},
+		{
+			name: "sanitizes malicious field names",
+			query: schema.LogQuery{
+				Expression: &schema.LogExpression{
+					Filters: []schema.LogFilter{
+						{Field: `bad"field | drop`, Operator: "=", Value: "test"},
+					},
+				},
+			},
+			mockResponse:  `{"status": "success", "data": { "resultType": "streams", "result": [] }}`,
+			expectedQuery: `{service_name=~".+"} | json | bad_field___drop="test"`,
+			wantEntries:   0,
+		},
 	}
 
 	for _, tt := range tests {
